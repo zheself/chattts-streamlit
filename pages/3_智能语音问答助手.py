@@ -8,17 +8,15 @@ import numpy as np
 import re
 import base64
 import io
+from streamlit import components
 
-dashscope.api_key = 'sk-afc61e5db6a0476886909c952a0acac8'  # 填入第一步获取的APIKEY
-base_path = r'C:\Users\Administrator\Desktop\chattts\ChatTTS-main\ChatTTS'
-
+base_path = r'C:\Users\Administrator\Desktop\ChatTTS-main\ChatTTS'
 
 def clean_text(text):
     # 去除特殊字符和换行符
     cleaned_text = re.sub(r'[^\w\s]', '', text)
     cleaned_text = cleaned_text.replace('\n', ' ')
     return cleaned_text
-
 
 def split_text(text, max_length=500):
     # 将文本分成多个段落
@@ -38,12 +36,15 @@ def split_text(text, max_length=500):
 
     return paragraphs
 
-
-def call_with_stream(user_input, messages):
+def call_with_stream(user_input):
     conversation_history = st.session_state.get('conversation_history', [])
+    if hasattr(st, 'audio_placeholder'):
+        st.audio_placeholder.empty()
+    if hasattr(st, 'placeholder1'):
+        st.placeholder1.empty()
     chat = ChatTTS.Chat()
     chat.load_models(source='local', local_path=base_path)
-    system_prompt = "请注意以下要求:输出一整段话,不能换行;不能出现数字、字母或符号,只能使用纯中文文字,字数不超过120个字。"
+    system_prompt = "请注意以下要求:输出一整段话,不能换行;不能出现数字、字母或符号,只能使用纯中文文字,字数不能超过150个字。"
     conversation_history.append({'role': 'system', 'content': system_prompt})
 
     # 添加用户问题到对话历史
@@ -55,28 +56,28 @@ def call_with_stream(user_input, messages):
                                 result_format='message',
                                 stream=True,
                                 incremental_output=True)
-
     full_content = ''  # 用于记录完整的对话内容
     current_line = ''  # 用于跟踪当前行的内容
     line_length_threshold = 80  # 设置一行的最大字符数
 
+    placeholder2 =st.empty()
     for response in responses:
         if response.status_code == HTTPStatus.OK:
             assistant_response = response.output.choices[0]['message']
-            full_content += assistant_response['content'] + '\n'  # 记录对话内容
-
             for char in assistant_response['content']:
                 current_line += char
                 if len(current_line) >= line_length_threshold and char in ['。', '，', '？', '!']:
-                    messages.chat_message("assistant").write(current_line)
+                    full_content += current_line + '\n'
+                    placeholder2.chat_message("assistant").write(full_content)
                     current_line = ''
-
         else:
-            messages.chat_message("assistant").write(f'Request id: {response.request_id}, Status code: {response.status_code}, error code: {response.code}, error message: {response.message}')
+            placeholder2.chat_message("assistant").write(
+                f'Request id: {response.request_id}, Status code: {response.status_code}, error code: {response.code}, error message: {response.message}')
 
+    # 最后一次更新，如果有剩余的内容
     if current_line:
-        messages.chat_message("assistant").write(current_line)
-
+        full_content += current_line
+        placeholder2.chat_message("assistant").write(full_content)
     # 显示语音生成的进度条和提示
     with st.spinner('正在生成语音播报,请稍候...'):
         progress_bar = st.progress(0)
@@ -111,7 +112,7 @@ def call_with_stream(user_input, messages):
         audio_base64 = base64.b64encode(wav_bytes.read()).decode()
 
         # 在网页上展示音频播放器
-        st.markdown(f"""
+        st.audio_placeholder = st.markdown(f"""
         <audio controls>
           <source src="data:audio/wav;base64,{audio_base64}" type="audio/wav">
         Your browser does not support the audio element.
@@ -120,34 +121,29 @@ def call_with_stream(user_input, messages):
 
     conversation_history.append({'role': assistant_response['role'], 'content': full_content})
     st.session_state['conversation_history'] = conversation_history
-    st.success("音频文件制作完成!")
-
+    st.placeholder1 = st.success("音频文件制作完成!")
 
 def main():
+    dashscope.api_key = 'sk-afc61e5db6a0476886909c952a0acac8'  # 填入第一步获取的APIKEY
     st.title("地震信息小助手demo")
 
     # 初始化对话历史
     if 'conversation_history' not in st.session_state:
         st.session_state['conversation_history'] = []
 
-    # 创建聊天容器
-    messages = st.container()
-
     # 显示之前的对话内容
     for message in st.session_state['conversation_history']:
         if message['role'] == 'user':
-            messages.chat_message("user").write(message['content'])
+            st.chat_message("user").write(message['content'])
         elif message['role'] == 'assistant':
-            messages.chat_message("assistant").write(message['content'])
+            st.chat_message("assistant").write(message['content'])
 
     # 获取用户输入
     user_input = st.chat_input("请输入您的问题:", key="input")
 
     if user_input:
-        messages.chat_message("user").write(user_input)
-        st.session_state['conversation_history'].append({'role': 'user', 'content': user_input})
-        call_with_stream(user_input, messages)
-
+        st.chat_message("user").write(user_input)
+        call_with_stream(user_input)
 
 if __name__ == '__main__':
     main()
